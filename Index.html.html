@@ -1,0 +1,2271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SatRadar Pro" />
+  <meta name="theme-color" content="#090d16" />
+  <title>SatRadar Pro — Car &amp; Bike Satellite Radar</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    :root {
+      --bg-main: #090d16;
+      --bg-card: #111827;
+      --bg-elev: #1a2335;
+      --border-subtle: rgba(148, 163, 184, 0.16);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg-main);
+      color: #f8fafc;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      overflow-x: hidden;
+    }
+    .hud-mirrored {
+      transform: scaleY(-1);
+    }
+    .radar-pulse {
+      animation: radarPulse 1.4s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+    }
+    @keyframes radarPulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 18px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .amber-pulse {
+      animation: amberPulse 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+    }
+    @keyframes amberPulse {
+      0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
+      70% { box-shadow: 0 0 0 14px rgba(245, 158, 11, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+    .leaflet-container {
+      background: #0b1120;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .leaflet-popup-content-wrapper {
+      background: #111827;
+      color: #f8fafc;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+    }
+    .leaflet-popup-tip {
+      background: #111827;
+    }
+    .cam-marker {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      border: 2.5px solid #ffffff;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+      font-weight: 800;
+      font-size: 11px;
+      color: #ffffff;
+    }
+    .user-beacon {
+      width: 22px;
+      height: 22px;
+      border-radius: 9999px;
+      background: #38bdf8;
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 8px rgba(56, 189, 248, 0.35), 0 0 18px rgba(56, 189, 248, 0.8);
+    }
+    .bike-mode-speed {
+      font-size: clamp(4.5rem, 12vw, 7rem);
+      line-height: 0.95;
+    }
+    .car-mode-speed {
+      font-size: clamp(3.2rem, 7vw, 4.75rem);
+      line-height: 1;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+  </style>
+</head>
+<body class="min-h-screen bg-[#090d16] text-slate-100 antialiased selection:bg-cyan-500/30">
+
+  <!-- First-Launch / Voice Arming Banner (non-blocking, auto-hides on tap) -->
+  <div id="armBanner" class="bg-gradient-to-r from-cyan-950/90 via-slate-900 to-indigo-950/90 border-b border-cyan-500/30 px-4 py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5 text-xs sm:text-sm text-cyan-100">
+        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+        <span id="greetingPreviewText" class="font-medium">Ready to greet &amp; arm live satellite radar.</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btnArmVoice" type="button" class="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs sm:text-sm transition flex items-center gap-1.5 shadow-lg shadow-cyan-500/20">
+          <i data-lucide="cpu" class="w-4 h-4"></i>
+          <span>Initialize J.A.R.V.I.S.</span>
+        </button>
+        <button id="btnDismissBanner" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition" aria-label="Dismiss banner">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Navigation Header -->
+  <header class="sticky top-0 z-30 bg-[#090d16]/95 backdrop-blur-md border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-3 sm:px-5 py-2.5 flex items-center justify-between gap-2">
+      <!-- Brand -->
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 shrink-0">
+          <i data-lucide="radar" class="w-5 h-5 text-slate-950"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <h1 class="text-sm sm:text-base font-extrabold tracking-tight text-white truncate">SatRadar Pro</h1>
+            <span id="gpsStatusBadge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span id="gpsStatusLabel">Auto-Armed</span>
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-400 truncate" id="syncStatusSub">Satellite sync active • Bhubaneswar</p>
+        </div>
+      </div>
+
+      <!-- Vehicle Switcher (Bike / Car) -->
+      <div class="flex items-center bg-slate-900 border border-slate-700/80 rounded-xl p-1 shrink-0" role="group" aria-label="Vehicle Mode">
+        <button id="btnModeBike" type="button" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition bg-cyan-500 text-slate-950 shadow">
+          <i data-lucide="bike" class="w-3.5 h-3.5"></i>
+          <span>Bike</span>
+        </button>
+        <button id="btnModeCar" type="button" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition text-slate-300 hover:text-white">
+          <i data-lucide="car" class="w-3.5 h-3.5"></i>
+          <span>Car</span>
+        </button>
+      </div>
+
+      <!-- Right Action Buttons -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button id="btnAutoStartGuide" type="button" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-cyan-300 flex items-center gap-1.5 transition" title="iOS & Android Bluetooth Auto-Start Setup">
+          <i data-lucide="bluetooth" class="w-3.5 h-3.5"></i>
+          <span class="hidden md:inline">Auto-Start Setup</span>
+        </button>
+        <button id="btnOpenSettings" type="button" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition" aria-label="Settings">
+          <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Active Proximity Alert Banner (always visible when a camera is within alert radius) -->
+  <div id="alertBanner" class="hidden max-w-7xl mx-auto px-3 sm:px-5 pt-3">
+    <div id="alertBannerCard" class="rounded-2xl p-3.5 sm:p-4 border flex flex-wrap items-center justify-between gap-3 transition-all">
+      <div class="flex items-center gap-3 min-w-0">
+        <div id="alertIconBox" class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-red-500 text-white shadow-lg">
+          <i data-lucide="camera" class="w-6 h-6"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span id="alertTypeBadge" class="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-red-500/20 text-red-200">SPEED CAMERA</span>
+            <span id="alertDistanceBig" class="text-xl sm:text-2xl font-black text-white">320 m</span>
+          </div>
+          <p id="alertCamName" class="text-xs sm:text-sm text-slate-200 font-medium truncate">Jaydev Vihar Junction</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="w-14 h-14 rounded-full border-4 border-red-500 bg-white text-slate-950 flex flex-col items-center justify-center shadow-lg shrink-0">
+          <span id="alertLimitVal" class="text-xl font-black leading-none">50</span>
+          <span class="text-[9px] font-bold uppercase tracking-tight text-slate-600">km/h</span>
+        </div>
+        <button id="btnMuteAlert" type="button" class="px-3 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-700">
+          Acknowledge
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Cockpit Grid -->
+  <main id="cockpitRoot" class="max-w-7xl mx-auto px-3 sm:px-5 py-3.5 space-y-4">
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+      <!-- Left Column: Speedometer, Controls & Quick Camera Reporting -->
+      <section class="lg:col-span-4 space-y-3.5 order-1">
+
+        <!-- Speedometer & Limit Card -->
+        <div id="speedCard" class="bg-[#111827] border border-slate-800 rounded-2xl p-4 sm:p-5 relative overflow-hidden transition-all">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <div class="flex items-center gap-2">
+              <span id="vehicleBadge" class="px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-bold uppercase tracking-wider">Bike Mode</span>
+              <span id="sourceModeChip" class="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-semibold">Live GPS</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button id="btnHudFlip" type="button" class="hidden px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-slate-200 items-center gap-1 transition" title="Flip display for windshield HUD">
+                <i data-lucide="flip-vertical-2" class="w-3.5 h-3.5"></i>
+                <span>HUD</span>
+              </button>
+              <button id="btnVoiceToggle" type="button" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 transition" title="Toggle Voice Alerts">
+                <i data-lucide="volume-2" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Speed Readout + Limit Sign -->
+          <div class="flex items-center justify-between gap-4 py-1">
+            <div>
+              <div id="speedValue" class="bike-mode-speed font-black tracking-tighter text-white tabular-nums">0</div>
+              <div class="flex items-center gap-2 mt-1">
+                <span class="text-xs font-bold uppercase tracking-widest text-slate-400">km/h</span>
+                <span id="overspeedTag" class="hidden px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-[11px] font-extrabold uppercase tracking-wider">Over Limit</span>
+              </div>
+            </div>
+
+            <!-- Road Speed Limit Sign -->
+            <div class="flex flex-col items-center">
+              <div id="limitCircle" class="w-20 h-20 sm:w-22 sm:h-22 rounded-full border-[6px] border-red-500 bg-white text-slate-950 flex flex-col items-center justify-center shadow-xl">
+                <span id="currentLimitDisplay" class="text-2xl sm:text-3xl font-black leading-none tabular-nums">50</span>
+                <span class="text-[9px] font-extrabold uppercase tracking-wider text-slate-600">LIMIT</span>
+              </div>
+              <span class="text-[10px] text-slate-400 mt-1.5 font-medium" id="headingDisplay">Heading: N • 0°</span>
+            </div>
+          </div>
+
+          <!-- Nearest Camera Mini Telemetry -->
+          <div class="mt-4 pt-3.5 border-t border-slate-800/90 grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
+              <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Nearest Cam</div>
+              <div id="statNearestDist" class="text-sm font-extrabold text-cyan-300 mt-0.5 tabular-nums">--</div>
+            </div>
+            <div class="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
+              <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Active Cams</div>
+              <div id="statCamCount" class="text-sm font-extrabold text-white mt-0.5 tabular-nums">0</div>
+            </div>
+            <div class="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
+              <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Max Speed</div>
+              <div id="statMaxSpeed" class="text-sm font-extrabold text-amber-300 mt-0.5 tabular-nums">0 km/h</div>
+            </div>
+          </div>
+
+          <!-- Tracking Mode Switch: Live GPS vs Interactive Demo Ride -->
+          <div class="mt-3.5 grid grid-cols-2 gap-2">
+            <button id="btnStartLiveGps" type="button" class="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-md shadow-emerald-500/20">
+              <i data-lucide="satellite" class="w-4 h-4"></i>
+              <span>Live Satellite GPS</span>
+            </button>
+            <button id="btnToggleSim" type="button" class="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 transition">
+              <i data-lucide="play-circle" class="w-4 h-4 text-cyan-400"></i>
+              <span id="simBtnLabel">Test Demo Ride</span>
+            </button>
+          </div>
+
+          <!-- Simulator Speed Control (visible only when Demo Ride is active) -->
+          <div id="simControlsBox" class="hidden mt-3 p-3 rounded-xl bg-cyan-950/35 border border-cyan-500/30 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-cyan-300 flex items-center gap-1.5">
+                <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
+                Bhubaneswar Demo Route
+              </span>
+              <span id="simSpeedLabel" class="font-extrabold text-white tabular-nums">58 km/h</span>
+            </div>
+            <input id="simSpeedSlider" type="range" min="15" max="110" value="58" class="w-full accent-cyan-400 cursor-pointer" />
+            <div class="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Drag to test over-speed alerts</span>
+              <button id="btnTestGreetingInline" type="button" class="text-cyan-300 hover:text-cyan-200 font-semibold underline">Replay Greeting</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- One-Tap Quick Report Camera Card (Glove-friendly in Bike Mode) -->
+        <div class="bg-[#111827] border border-slate-800 rounded-2xl p-4">
+          <div class="flex items-center justify-between mb-2.5">
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <i data-lucide="plus-circle" class="w-4 h-4 text-cyan-400"></i>
+              Quick Pin Camera Here
+            </h2>
+            <span class="text-[11px] text-slate-400">Or tap map to pin</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-2">
+            <button type="button" data-report-type="speed" class="report-btn py-2.5 px-3 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/35 text-red-200 text-xs font-bold flex items-center gap-2 transition">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0"></span>
+              <span>Speed Cam</span>
+            </button>
+            <button type="button" data-report-type="van" class="report-btn py-2.5 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-200 text-xs font-bold flex items-center gap-2 transition">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+              <span>Van / Mobile</span>
+            </button>
+            <button type="button" data-report-type="temporary" class="report-btn py-2.5 px-3 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/35 text-orange-200 text-xs font-bold flex items-center gap-2 transition">
+              <span class="w-2.5 h-2.5 rounded-full bg-orange-400 shrink-0"></span>
+              <span>Temp Cam</span>
+            </button>
+            <button type="button" data-report-type="repair" class="report-btn py-2.5 px-3 rounded-xl bg-yellow-500/15 hover:bg-yellow-500/25 border border-yellow-500/35 text-yellow-200 text-xs font-bold flex items-center gap-2 transition">
+              <span class="w-2.5 h-2.5 rounded-full bg-yellow-400 shrink-0"></span>
+              <span>Repair / Work</span>
+            </button>
+            <button type="button" data-report-type="redlight" class="report-btn py-2.5 px-3 rounded-xl bg-fuchsia-500/15 hover:bg-fuchsia-500/25 border border-fuchsia-500/35 text-fuchsia-200 text-xs font-bold flex items-center gap-2 transition">
+              <span class="w-2.5 h-2.5 rounded-full bg-fuchsia-400 shrink-0"></span>
+              <span>Red-Light / ANPR</span>
+            </button>
+            <button type="button" data-report-type="average" class="report-btn py-2.5 px-3 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/35 text-sky-200 text-xs font-bold flex items-center gap-2 transition">
+              <span class="w-2.5 h-2.5 rounded-full bg-sky-400 shrink-0"></span>
+              <span>Avg Speed</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Auto-Update Satellite Sync Card -->
+        <div class="bg-[#111827] border border-slate-800 rounded-2xl p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i data-lucide="refresh-cw" id="syncSpinnerIcon" class="w-4 h-4 text-emerald-400"></i>
+              <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-200">Auto-Update Database</h2>
+            </div>
+            <button id="btnSyncNow" type="button" class="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[11px] font-bold transition">
+              Sync Now
+            </button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div class="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800">
+              <div class="text-[10px] text-slate-400 uppercase font-semibold">Last Updated</div>
+              <div id="lastSyncTime" class="text-slate-100 font-bold mt-0.5">Just now</div>
+            </div>
+            <div class="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800">
+              <div class="text-[10px] text-slate-400 uppercase font-semibold">Next Auto-Sync</div>
+              <div id="nextSyncCountdown" class="text-cyan-300 font-bold mt-0.5 tabular-nums">04:59</div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 text-xs">
+            <label for="syncIntervalSelect" class="text-slate-400 font-medium">Auto-refresh every</label>
+            <select id="syncIntervalSelect" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-white focus:outline-none focus:border-cyan-500">
+              <option value="1">1 min (Live)</option>
+              <option value="5" selected>5 min (Balanced)</option>
+              <option value="15">15 min (Battery)</option>
+              <option value="30">30 min</option>
+            </select>
+          </div>
+          <p id="syncDetailMessage" class="text-[11px] text-slate-400 leading-relaxed">
+            Pulls live OpenStreetMap speed &amp; traffic enforcement cameras around your GPS position + keeps your saved custom pins.
+          </p>
+        </div>
+      </section>
+
+      <!-- Right Column: Live Satellite Map + Camera Filter Chips + Nearby Camera Feed -->
+      <section class="lg:col-span-8 space-y-3.5 order-2">
+
+        <!-- Map Card -->
+        <div class="bg-[#111827] border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <!-- Map Toolbar -->
+          <div class="px-3.5 py-2.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-900/70">
+            <div class="flex items-center gap-1.5" role="group" aria-label="Map Style">
+              <button id="btnMapSat" type="button" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-500 text-slate-950 transition">Satellite</button>
+              <button id="btnMapDark" type="button" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:text-white transition">Dark Radar</button>
+              <button id="btnMapStreet" type="button" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:text-white transition">Street</button>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="btnRecenter" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5 transition">
+                <i data-lucide="crosshair" class="w-3.5 h-3.5 text-cyan-400"></i>
+                <span>Center on Me</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Leaflet Map Container (explicit pixel height for reliable rendering) -->
+          <div id="radarMap" style="height: 430px; width: 100%;" class="z-10"></div>
+
+          <!-- Camera Type Filter Bar -->
+          <div class="px-3.5 py-2.5 border-t border-slate-800 bg-slate-900/70 flex flex-wrap items-center gap-1.5" id="filterChipBar">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">Filter:</span>
+            <button type="button" data-filter="speed" class="filter-chip px-2.5 py-1 rounded-full text-[11px] font-bold border border-red-500/40 bg-red-500/20 text-red-200 transition">Speed</button>
+            <button type="button" data-filter="redlight" class="filter-chip px-2.5 py-1 rounded-full text-[11px] font-bold border border-fuchsia-500/40 bg-fuchsia-500/20 text-fuchsia-200 transition">Red-Light/ANPR</button>
+            <button type="button" data-filter="van" class="filter-chip px-2.5 py-1 rounded-full text-[11px] font-bold border border-amber-500/40 bg-amber-500/20 text-amber-200 transition">Van/Mobile</button>
+            <button type="button" data-filter="temporary" class="filter-chip px-2.5 py-1 rounded-full text-[11px] font-bold border border-orange-500/40 bg-orange-500/20 text-orange-200 transition">Temporary</button>
+            <button type="button" data-filter="repair" class="filter-chip px-2.5 py-1 rounded-full text-[11px] font-bold border border-yellow-500/40 bg-yellow-500/20 text-yellow-200 transition">Repair Zone</button>
+            <button type="button" data-filter="average" class="filter-chip px-2.5 py-1 rounded-full text-[11px] font-bold border border-sky-500/40 bg-sky-500/20 text-sky-200 transition">Avg Speed</button>
+          </div>
+        </div>
+
+        <!-- Nearby Cameras List -->
+        <div class="bg-[#111827] border border-slate-800 rounded-2xl p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 class="text-sm font-extrabold text-white flex items-center gap-2">
+                <i data-lucide="list-filter" class="w-4 h-4 text-cyan-400"></i>
+                Nearby Traffic Cameras &amp; Alerts
+              </h2>
+              <p class="text-[11px] text-slate-400">Sorted by live distance from your current position</p>
+            </div>
+            <div class="flex items-center gap-2 text-[11px]">
+              <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold" id="osmCountBadge">OSM Live: 0</span>
+              <span class="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold" id="customCountBadge">Saved: 0</span>
+            </div>
+          </div>
+
+          <div id="cameraListContainer" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toastBox" class="fixed bottom-4 right-4 z-50 hidden max-w-sm bg-slate-900 border border-cyan-500/40 text-slate-100 px-4 py-3 rounded-xl shadow-2xl text-xs sm:text-sm font-medium flex items-center gap-2.5">
+    <i data-lucide="info" class="w-4 h-4 text-cyan-400 shrink-0"></i>
+    <span id="toastText">Notification</span>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#111827] border border-slate-700 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-extrabold text-white flex items-center gap-2">
+          <i data-lucide="sliders-horizontal" class="w-4 h-4 text-cyan-400"></i>
+          Radar &amp; Voice Settings
+        </h3>
+        <button id="btnCloseSettings" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3.5 text-sm">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-white">Auto-Start GPS on Open</div>
+            <div class="text-xs text-slate-400">Arm tracking &amp; keep screen awake automatically</div>
+          </div>
+          <input id="chkAutoStart" type="checkbox" checked class="w-5 h-5 accent-cyan-500 rounded cursor-pointer" />
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-white">Time-Based Voice Greeting</div>
+            <div class="text-xs text-slate-400">Says "Good morning/afternoon/evening, Welcome Sir"</div>
+          </div>
+          <input id="chkVoiceGreet" type="checkbox" checked class="w-5 h-5 accent-cyan-500 rounded cursor-pointer" />
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-white">Radar Beep &amp; Overspeed Chime</div>
+            <div class="text-xs text-slate-400">Synthesized alert tone near cameras</div>
+          </div>
+          <input id="chkSoundAlert" type="checkbox" checked class="w-5 h-5 accent-cyan-500 rounded cursor-pointer" />
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-slate-200">Alert Distance Radius</span>
+            <span id="alertRadiusLabel" class="font-bold text-cyan-300">600 m</span>
+          </div>
+          <input id="rangeAlertRadius" type="range" min="250" max="1200" step="50" value="600" class="w-full accent-cyan-500 cursor-pointer" />
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-slate-200">Default Road Limit (when unknown)</span>
+            <span id="defaultLimitLabel" class="font-bold text-cyan-300">50 km/h</span>
+          </div>
+          <input id="rangeDefaultLimit" type="range" min="30" max="100" step="10" value="50" class="w-full accent-cyan-500 cursor-pointer" />
+        </div>
+
+        <div class="pt-2.5 border-t border-slate-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+              <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
+              Neural Voice Engine
+            </div>
+            <span id="elStatusPill" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">Device Voice</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-1.5 text-[11px]">
+            <button id="btnEngineBrowser" type="button" class="py-1.5 px-2 rounded-lg border border-cyan-500/60 bg-cyan-500/20 text-cyan-200 font-bold transition">Device Natural (No API)</button>
+            <button id="btnEngineClips" type="button" class="py-1.5 px-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 font-bold transition">Real Voice Clips (No API)</button>
+            <button id="btnEngineGemini" type="button" class="py-1.5 px-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 font-bold transition">Gemini TTS (API)</button>
+            <button id="btnEngineEleven" type="button" class="py-1.5 px-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 font-bold transition">ElevenLabs (API)</button>
+          </div>
+
+          <div id="clipsConfigBox" class="hidden space-y-2.5 p-3 rounded-xl bg-slate-900/90 border border-emerald-500/35">
+            <div class="text-[11px] text-emerald-300 font-bold">100% Real Human Audio — Zero API Key</div>
+            <p class="text-[10px] text-slate-400 leading-relaxed">Upload any MP3/WAV/M4A clip or record directly with your mic. Saved locally on your device for instant offline playback.</p>
+            <div id="clipSlotsList" class="space-y-2"></div>
+          </div>
+
+          <div id="geminiConfigBox" class="hidden space-y-2.5 p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30">
+            <div>
+              <label for="gemApiKeyInput" class="block text-[11px] text-slate-300 font-semibold mb-1">Google AI Studio API Key (stored only on this device)</label>
+              <input id="gemApiKeyInput" type="password" placeholder="AIza... (from aistudio.google.com)" autocomplete="off" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label for="gemVoiceSelect" class="block text-[11px] text-slate-300 font-semibold mb-1">Gemini Voice</label>
+                <select id="gemVoiceSelect" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                  <option value="Orus">Orus (Firm Male — Jarvis)</option>
+                  <option value="Charon">Charon (Deep Informative)</option>
+                  <option value="Fenrir">Fenrir (Deep Dynamic)</option>
+                  <option value="Puck">Puck (Upbeat Male)</option>
+                  <option value="Kore">Kore (Firm Female)</option>
+                  <option value="Aoede">Aoede (Breezy)</option>
+                  <option value="Zephyr">Zephyr (Bright)</option>
+                </select>
+              </div>
+              <div>
+                <label for="gemStyleInput" class="block text-[11px] text-slate-300 font-semibold mb-1">Delivery Tone</label>
+                <input id="gemStyleInput" type="text" value="Calm, refined British AI copilot" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500" />
+              </div>
+            </div>
+            <p class="text-[10px] text-slate-400">Uses Gemini 2.5 Flash TTS with native style control. Get a free key at aistudio.google.com.</p>
+          </div>
+
+          <div id="elevenLabsConfigBox" class="space-y-2.5 p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30">
+            <div>
+              <label for="elApiKeyInput" class="block text-[11px] text-slate-300 font-semibold mb-1">ElevenLabs API Key (stored only on this device)</label>
+              <input id="elApiKeyInput" type="password" placeholder="sk_... (from elevenlabs.io)" autocomplete="off" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label for="elVoiceSelect" class="block text-[11px] text-slate-300 font-semibold mb-1">Studio Voice</label>
+                <select id="elVoiceSelect" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                  <option value="JBFqnCBsd6RMkjVDRZzb">George (British Male)</option>
+                  <option value="nPczCjzI2devNBz1zQrb">Brian (Deep Resonant)</option>
+                  <option value="custom">Custom Voice ID...</option>
+                </select>
+              </div>
+              <div>
+                <label for="elModelSelect" class="block text-[11px] text-slate-300 font-semibold mb-1">Speed / Quality</label>
+                <select id="elModelSelect" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+                  <option value="eleven_flash_v2_5">Flash v2.5 (Fastest)</option>
+                  <option value="eleven_multilingual_v2">Multilingual v2 (Rich)</option>
+                </select>
+              </div>
+            </div>
+            <div id="elCustomVoiceWrap" class="hidden">
+              <label for="elCustomVoiceId" class="block text-[11px] text-slate-300 font-semibold mb-1">Custom ElevenLabs Voice ID</label>
+              <input id="elCustomVoiceId" type="text" placeholder="Paste any Voice ID from ElevenLabs" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500" />
+            </div>
+            <div class="flex items-center justify-between gap-2 pt-0.5">
+              <button id="btnLoadElVoices" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-bold text-cyan-300 transition">
+                Load My Voices
+              </button>
+              <span class="text-[10px] text-slate-400">Free plan works (~10k chars/mo)</span>
+            </div>
+          </div>
+
+          <div id="browserVoiceWrap" class="space-y-1.5">
+            <label for="voiceSelect" class="block text-xs text-slate-400 font-semibold">Natural Device Voice (Auto-picks Enhanced / Natural UK)</label>
+            <select id="voiceSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+              <option value="auto">Auto (Best Natural British Voice)</option>
+            </select>
+            <p class="text-[10px] text-slate-400 leading-relaxed">Tip for human-sounding free voice: On iPhone, download <strong>Daniel (Enhanced)</strong> or <strong>Arthur (Enhanced)</strong> in Settings &rarr; Accessibility &rarr; Spoken Content &rarr; Voices. On desktop, Microsoft Edge includes free <strong>Natural</strong> voices.</p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-300 font-semibold">Pitch</span>
+                <span id="voicePitchLabel" class="font-bold text-cyan-300">0.88</span>
+              </div>
+              <input id="rangeVoicePitch" type="range" min="0.70" max="1.15" step="0.02" value="0.88" class="w-full accent-cyan-500 cursor-pointer" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-300 font-semibold">Speed</span>
+                <span id="voiceRateLabel" class="font-bold text-cyan-300">0.96</span>
+              </div>
+              <input id="rangeVoiceRate" type="range" min="0.80" max="1.15" step="0.02" value="0.96" class="w-full accent-cyan-500 cursor-pointer" />
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-slate-800 flex flex-wrap gap-2">
+          <button id="btnModalTestGreet" type="button" class="flex-1 py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition">
+            Test J.A.R.V.I.S. Greeting
+          </button>
+          <button id="btnResetCustomCams" type="button" class="py-2 px-3 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/35 text-red-300 font-bold text-xs transition">
+            Reset Pins
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- iOS & Android Bluetooth Auto-Start Setup Modal -->
+  <div id="autoStartModal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#111827] border border-slate-700 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-extrabold text-white flex items-center gap-2">
+          <i data-lucide="bluetooth" class="w-4 h-4 text-cyan-400"></i>
+          Auto-Open When Bike / Car Starts
+        </h3>
+        <button id="btnCloseAutoStart" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed">
+        Because iOS and Android browsers don't allow a website to launch itself from the background, connect this app to your phone's built-in Bluetooth automation so it opens automatically whenever your bike or car connects:
+      </p>
+
+      <div class="space-y-3 text-xs">
+        <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+          <div class="font-extrabold text-white flex items-center gap-1.5">
+            <span class="px-1.5 py-0.5 rounded bg-slate-700 text-[10px]">iOS / iPhone</span>
+            Apple Shortcuts Automation
+          </div>
+          <ol class="list-decimal list-inside text-slate-300 space-y-1 leading-relaxed">
+            <li>Open the <strong>Shortcuts</strong> app &rarr; tap <strong>Automation</strong> &rarr; tap <strong>+</strong>.</li>
+            <li>Choose <strong>Bluetooth</strong> &rarr; select your <strong>Bike / Helmet / Car</strong> &rarr; pick <strong>Is Connected</strong> &rarr; <strong>Run Immediately</strong>.</li>
+            <li>Add action <strong>Open URLs</strong> (or <strong>Open App</strong> if added to Home Screen) pointing to SatRadar Pro.</li>
+            <li>When you start your bike, your iPhone triggers SatRadar Pro automatically and arms live GPS.</li>
+          </ol>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+          <div class="font-extrabold text-white flex items-center gap-1.5">
+            <span class="px-1.5 py-0.5 rounded bg-emerald-600/30 text-emerald-300 text-[10px]">Android</span>
+            Modes &amp; Routines / MacroDroid
+          </div>
+          <ol class="list-decimal list-inside text-slate-300 space-y-1 leading-relaxed">
+            <li>In Chrome, tap <strong>&#8942; &rarr; Add to Home screen</strong> to install SatRadar Pro like a native app.</li>
+            <li>Open <strong>Settings &rarr; Modes &amp; Routines</strong> (Samsung) or <strong>MacroDroid</strong> (any Android).</li>
+            <li>Set Trigger: <strong>Bluetooth Device Connected &rarr; [Your Bike / Car]</strong>.</li>
+            <li>Set Action: <strong>Open App &rarr; SatRadar Pro</strong> (and optionally set Media Volume to 85% for helmet voice alerts).</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="flex justify-end">
+        <button id="btnDoneAutoStart" type="button" class="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition">
+          Got It
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Custom Camera Modal (when tapping map) -->
+  <div id="addCamModal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#111827] border border-slate-700 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+        <h3 class="text-sm font-extrabold text-white">Pin New Camera on Map</h3>
+        <button id="btnCloseAddCam" type="button" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label for="newCamName" class="block text-slate-400 font-semibold mb-1">Location / Label</label>
+          <input id="newCamName" type="text" placeholder="e.g., NH-16 Van Camera" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label for="newCamType" class="block text-slate-400 font-semibold mb-1">Camera Type</label>
+            <select id="newCamType" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white focus:outline-none focus:border-cyan-500">
+              <option value="speed">Fixed Speed</option>
+              <option value="redlight">Red-Light / ANPR</option>
+              <option value="van">Mobile / Van</option>
+              <option value="temporary">Temporary</option>
+              <option value="repair">Repair / Roadwork</option>
+              <option value="average">Average Speed</option>
+            </select>
+          </div>
+          <div>
+            <label for="newCamLimit" class="block text-slate-400 font-semibold mb-1">Speed Limit (km/h)</label>
+            <input id="newCamLimit" type="number" min="20" max="140" step="5" value="50" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" />
+          </div>
+        </div>
+        <div class="text-[11px] text-slate-400" id="newCamCoordsLabel">Coordinates: --</div>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button id="btnCancelAddCam" type="button" class="px-3 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs">Cancel</button>
+        <button id="btnSaveNewCam" type="button" class="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs">Save Pin</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // --- Grounded Coordinates (Bhubaneswar, Odisha) ---
+      const DEFAULT_CENTER = { lat: 20.27, lng: 85.84 };
+
+      const CAMERA_META = {
+        speed:     { label: 'Fixed Speed Camera', short: 'SPD', color: '#ef4444', badgeClass: 'bg-red-500/20 text-red-200 border-red-500/40' },
+        redlight:  { label: 'Red-Light / ANPR',   short: 'ANPR', color: '#d946ef', badgeClass: 'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-500/40' },
+        van:       { label: 'Mobile Van Camera',  short: 'VAN', color: '#f59e0b', badgeClass: 'bg-amber-500/20 text-amber-200 border-amber-500/40' },
+        temporary: { label: 'Temporary Camera',   short: 'TMP', color: '#f97316', badgeClass: 'bg-orange-500/20 text-orange-200 border-orange-500/40' },
+        repair:    { label: 'Repair / Work Zone', short: 'WRK', color: '#eab308', badgeClass: 'bg-yellow-500/20 text-yellow-200 border-yellow-500/40' },
+        average:   { label: 'Average Speed Zone', short: 'AVG', color: '#38bdf8', badgeClass: 'bg-sky-500/20 text-sky-200 border-sky-500/40' }
+      };
+
+      // Local Bhubaneswar Smart City corridor presets at tool-verified junction coordinates
+      const PRESET_CAMERAS = [
+        { id: 'preset-1', name: 'Master Canteen Square (ANPR)', type: 'redlight', lat: 20.26846, lng: 85.84094, limit: 40, source: 'preset' },
+        { id: 'preset-2', name: 'Vani Vihar NH-16 Stretch', type: 'speed', lat: 20.298461, lng: 85.834386, limit: 50, source: 'preset' },
+        { id: 'preset-3', name: 'Jaydev Vihar Junction (Smart City)', type: 'redlight', lat: 20.2997, lng: 85.8173, limit: 40, source: 'preset' },
+        { id: 'preset-4', name: 'Rasulgarh Bypass Patrol Van', type: 'van', lat: 20.288079, lng: 85.873041, limit: 60, source: 'preset' },
+        { id: 'preset-5', name: 'Patia Corridor Temp Radar', type: 'temporary', lat: 20.35858, lng: 85.823025, limit: 50, source: 'preset' },
+        { id: 'preset-6', name: 'Bhubaneswar Central Work Zone', type: 'repair', lat: 20.2760, lng: 85.8390, limit: 30, source: 'preset' }
+      ];
+
+      // Demo route waypoints along the verified Bhubaneswar coordinates
+      const DEMO_WAYPOINTS = [
+        { lat: 20.26846, lng: 85.84094 },
+        { lat: 20.2760,  lng: 85.8390  },
+        { lat: 20.298461, lng: 85.834386 },
+        { lat: 20.2997,  lng: 85.8173  },
+        { lat: 20.35858, lng: 85.823025 },
+        { lat: 20.288079, lng: 85.873041 },
+        { lat: 20.26846, lng: 85.84094 }
+      ];
+
+      // --- Persisted State Helpers ---
+      function safeGetStorage(key, fallback) {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : fallback;
+        } catch (e) {
+          return fallback;
+        }
+      }
+      function safeSetStorage(key, value) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (e) {
+          // Ignore storage quota / sandbox restrictions
+        }
+      }
+
+      // --- App State ---
+      const state = {
+        vehicleMode: safeGetStorage('satradar_vehicle', 'bike'),
+        mapStyle: safeGetStorage('satradar_mapstyle', 'satellite'),
+        trackingMode: 'live', // 'live' | 'sim'
+        autoStart: safeGetStorage('satradar_autostart', true),
+        voiceEnabled: safeGetStorage('satradar_voice', true),
+        soundEnabled: safeGetStorage('satradar_sound', true),
+        voiceEngine: safeGetStorage('satradar_voice_engine', 'browser'),
+        elApiKey: safeGetStorage('satradar_el_key', ''),
+        elVoiceId: safeGetStorage('satradar_el_voice', 'JBFqnCBsd6RMkjVDRZzb'),
+        elCustomVoiceId: safeGetStorage('satradar_el_custom_voice', ''),
+        elModelId: safeGetStorage('satradar_el_model', 'eleven_flash_v2_5'),
+        gemApiKey: safeGetStorage('satradar_gem_key', ''),
+        gemVoiceName: safeGetStorage('satradar_gem_voice', 'Orus'),
+        gemStyle: safeGetStorage('satradar_gem_style', 'Calm, refined British AI copilot'),
+        voiceURI: safeGetStorage('satradar_voice_uri', 'auto'),
+        voicePitch: safeGetStorage('satradar_voice_pitch', 0.88),
+        voiceRate: safeGetStorage('satradar_voice_rate', 0.96),
+        lastOverspeedSpokenTs: 0,
+        hudMirror: false,
+        alertRadiusMeters: safeGetStorage('satradar_radius', 600),
+        defaultLimit: safeGetStorage('satradar_limit', 50),
+        syncIntervalMin: safeGetStorage('satradar_syncmin', 5),
+        enabledTypes: safeGetStorage('satradar_filters', {
+          speed: true, redlight: true, van: true, temporary: true, repair: true, average: true
+        }),
+        userPos: { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng },
+        speedKmh: 0,
+        headingDeg: 0,
+        maxSpeedKmh: 0,
+        customCameras: safeGetStorage('satradar_custom_cams', []),
+        osmCameras: safeGetStorage('satradar_osm_cams', []),
+        lastSyncPos: null,
+        lastSyncTs: safeGetStorage('satradar_last_sync', null),
+        nextSyncSec: 300,
+        greetedOnce: false,
+        spokenCamIds: {},
+        mutedCamId: null,
+        pendingPinCoords: null,
+        simActive: false,
+        simSegIdx: 0,
+        simT: 0,
+        simSpeedKmh: 58
+      };
+
+      let map = null;
+      let baseLayers = {};
+      let activeLayers = [];
+      let userMarker = null;
+      let userRadiusCircle = null;
+      let cameraLayerGroup = null;
+      let geoWatchId = null;
+      let simTimerId = null;
+      let syncCountdownId = null;
+      let audioCtx = null;
+      let lastBeepTs = 0;
+      let wakeLockSentinel = null;
+      let toastTimerId = null;
+      let activeElAudio = null;
+      const elAudioCache = new Map();
+      const customClipUrls = {};
+      let activeMediaRecorder = null;
+      let activeRecordingSlot = null;
+
+      const CLIP_SLOTS = [
+        { key: 'morning',   label: 'Morning Greeting' },
+        { key: 'afternoon', label: 'Afternoon Greeting' },
+        { key: 'evening',   label: 'Evening Greeting' },
+        { key: 'camera',    label: 'Camera Ahead Alert' },
+        { key: 'overspeed', label: 'Overspeed Warning' }
+      ];
+
+      function openClipDb() {
+        return new Promise((resolve, reject) => {
+          if (!('indexedDB' in window)) return reject(new Error('No IndexedDB'));
+          try {
+            const req = indexedDB.open('satradar_clips_db', 1);
+            req.onupgradeneeded = () => {
+              const db = req.result;
+              if (!db.objectStoreNames.contains('clips')) db.createObjectStore('clips');
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+
+      async function saveClipBlob(slotKey, blob) {
+        if (customClipUrls[slotKey]) URL.revokeObjectURL(customClipUrls[slotKey]);
+        customClipUrls[slotKey] = URL.createObjectURL(blob);
+        try {
+          const db = await openClipDb();
+          await new Promise((res, rej) => {
+            const tx = db.transaction('clips', 'readwrite');
+            tx.objectStore('clips').put(blob, slotKey);
+            tx.oncomplete = res;
+            tx.onerror = rej;
+          });
+        } catch (e) {}
+        renderClipSlots();
+        syncVoiceEngineUi();
+      }
+
+      async function deleteClipBlob(slotKey) {
+        if (customClipUrls[slotKey]) {
+          URL.revokeObjectURL(customClipUrls[slotKey]);
+          delete customClipUrls[slotKey];
+        }
+        try {
+          const db = await openClipDb();
+          await new Promise((res, rej) => {
+            const tx = db.transaction('clips', 'readwrite');
+            tx.objectStore('clips').delete(slotKey);
+            tx.oncomplete = res;
+            tx.onerror = rej;
+          });
+        } catch (e) {}
+        renderClipSlots();
+        syncVoiceEngineUi();
+      }
+
+      async function loadAllSavedClips() {
+        try {
+          const db = await openClipDb();
+          for (const slot of CLIP_SLOTS) {
+            const blob = await new Promise((res) => {
+              const tx = db.transaction('clips', 'readonly');
+              const req = tx.objectStore('clips').get(slot.key);
+              req.onsuccess = () => res(req.result || null);
+              req.onerror = () => res(null);
+            });
+            if (blob) {
+              customClipUrls[slot.key] = URL.createObjectURL(blob);
+            }
+          }
+        } catch (e) {}
+        renderClipSlots();
+        syncVoiceEngineUi();
+      }
+
+      function playCustomClip(slotKey) {
+        const url = customClipUrls[slotKey];
+        if (!url) return false;
+        try {
+          if (activeElAudio) {
+            activeElAudio.pause();
+            activeElAudio = null;
+          }
+          const audio = new Audio(url);
+          activeElAudio = audio;
+          audio.play().catch(() => {});
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      async function toggleMicRecord(slotKey) {
+        if (activeMediaRecorder && activeMediaRecorder.state === 'recording') {
+          activeMediaRecorder.stop();
+          return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          showToast('Mic recording not supported here — upload an MP3/WAV clip instead.');
+          return;
+        }
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const chunks = [];
+          const rec = new MediaRecorder(stream);
+          activeMediaRecorder = rec;
+          activeRecordingSlot = slotKey;
+          rec.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+          rec.onstop = async () => {
+            stream.getTracks().forEach((t) => t.stop());
+            const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+            activeMediaRecorder = null;
+            activeRecordingSlot = null;
+            await saveClipBlob(slotKey, blob);
+            showToast('Voice clip recorded & saved!');
+          };
+          rec.start();
+          renderClipSlots();
+          showToast('Recording... tap Stop when finished.');
+        } catch (e) {
+          showToast('Microphone permission denied — use Upload MP3/WAV instead.');
+        }
+      }
+
+      function renderClipSlots() {
+        const box = document.getElementById('clipSlotsList');
+        if (!box) return;
+        box.innerHTML = CLIP_SLOTS.map((slot) => {
+          const hasClip = !!customClipUrls[slot.key];
+          const isRec = activeRecordingSlot === slot.key;
+          return `
+            <div class="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-950 border ${hasClip ? 'border-emerald-500/40' : 'border-slate-800'}">
+              <div class="min-w-0">
+                <div class="text-[11px] font-bold text-white truncate">${slot.label}</div>
+                <div class="text-[10px] ${hasClip ? 'text-emerald-400' : 'text-slate-500'}">${isRec ? 'Recording...' : hasClip ? 'Real audio ready' : 'Not set (uses natural voice)'}</div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <label class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-200 cursor-pointer">
+                  Upload
+                  <input type="file" accept="audio/*" data-clip-upload="${slot.key}" class="hidden" />
+                </label>
+                <button type="button" data-clip-rec="${slot.key}" class="px-2 py-1 rounded ${isRec ? 'bg-red-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-cyan-300'} text-[10px] font-bold">
+                  ${isRec ? 'Stop' : 'Rec'}
+                </button>
+                ${hasClip ? `<button type="button" data-clip-play="${slot.key}" class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">Play</button>` : ''}
+                ${hasClip ? `<button type="button" data-clip-del="${slot.key}" class="px-1.5 py-1 rounded bg-red-500/15 text-red-300 text-[10px] font-bold">&times;</button>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // --- Utility Math ---
+      function haversineMeters(lat1, lng1, lat2, lng2) {
+        const R = 6371000;
+        const toRad = (d) => (d * Math.PI) / 180;
+        const dLat = toRad(lat2 - lat1);
+        const dLng = toRad(lng2 - lng1);
+        const a = Math.sin(dLat / 2) ** 2 +
+                  Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      function computeBearing(lat1, lng1, lat2, lng2) {
+        const toRad = (d) => (d * Math.PI) / 180;
+        const toDeg = (r) => (r * 180) / Math.PI;
+        const y = Math.sin(toRad(lng2 - lng1)) * Math.cos(toRad(lat2));
+        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                  Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lng2 - lng1));
+        return (toDeg(Math.atan2(y, x)) + 360) % 360;
+      }
+
+      function compassDir(deg) {
+        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+        return dirs[Math.round(deg / 45) % 8];
+      }
+
+      function formatDistance(meters) {
+        if (!Number.isFinite(meters)) return '--';
+        if (meters < 1000) return `${Math.round(meters)} m`;
+        return `${(meters / 1000).toFixed(1)} km`;
+      }
+
+      function getTimeGreeting() {
+        const hr = new Date().getHours();
+        if (hr >= 5 && hr < 12) return 'Good morning';
+        if (hr >= 12 && hr < 17) return 'Good afternoon';
+        return 'Good evening';
+      }
+
+      function getAllCameras() {
+        return [...PRESET_CAMERAS, ...state.osmCameras, ...state.customCameras];
+      }
+
+      // --- Toast ---
+      function showToast(msg) {
+        const box = document.getElementById('toastBox');
+        const txt = document.getElementById('toastText');
+        if (!box || !txt) return;
+        txt.textContent = msg;
+        box.classList.remove('hidden');
+        clearTimeout(toastTimerId);
+        toastTimerId = setTimeout(() => box.classList.add('hidden'), 3500);
+      }
+
+      // --- Voice & Audio Engine ---
+      function ensureAudioCtx() {
+        if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
+          try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new Ctx();
+          } catch (e) {}
+        }
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+      }
+
+      function playRadarBeep(urgent) {
+        if (!state.soundEnabled) return;
+        const now = Date.now();
+        if (now - lastBeepTs < (urgent ? 850 : 2000)) return;
+        lastBeepTs = now;
+        ensureAudioCtx();
+        if (!audioCtx) return;
+        try {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = urgent ? 'sawtooth' : 'sine';
+          osc.frequency.setValueAtTime(urgent ? 980 : 660, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.16);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.17);
+        } catch (e) {}
+      }
+
+      function playJarvisChime() {
+        if (!state.soundEnabled) return;
+        ensureAudioCtx();
+        if (!audioCtx) return;
+        try {
+          const now = audioCtx.currentTime;
+          [523.25, 659.25, 1046.5].forEach((freq, idx) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + idx * 0.07);
+            gain.gain.setValueAtTime(0.001, now + idx * 0.07);
+            gain.gain.linearRampToValueAtTime(0.06, now + idx * 0.07 + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0008, now + idx * 0.07 + 0.24);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now + idx * 0.07);
+            osc.stop(now + idx * 0.07 + 0.25);
+          });
+        } catch (e) {}
+      }
+
+      function getBestJarvisVoice() {
+        if (!('speechSynthesis' in window)) return null;
+        const voices = window.speechSynthesis.getVoices() || [];
+        if (!voices.length) return null;
+
+        if (state.voiceURI && state.voiceURI !== 'auto') {
+          const exact = voices.find((v) => v.voiceURI === state.voiceURI);
+          if (exact) return exact;
+        }
+
+        // Prioritize genuine neural/natural/enhanced British male voices first (Zero API)
+        const naturalPatterns = [
+          /microsoft ryan.*natural/i,
+          /microsoft george.*natural/i,
+          /daniel.*(enhanced|premium)/i,
+          /arthur.*(enhanced|premium)/i,
+          /oliver.*(enhanced|premium)/i,
+          /natural.*(uk|british|en-gb)/i,
+          /google uk english male/i,
+          /daniel/i,
+          /arthur/i,
+          /microsoft ryan/i,
+          /microsoft george/i,
+          /oliver/i,
+          /malcolm/i,
+          /brian/i,
+          /edward/i
+        ];
+        for (const rx of naturalPatterns) {
+          const found = voices.find((v) => rx.test(v.name) || (rx.test(`${v.name} ${v.lang}`)));
+          if (found) return found;
+        }
+        const anyNaturalEn = voices.find((v) => /^en/i.test(v.lang) && /(natural|enhanced|premium|neural)/i.test(v.name));
+        if (anyNaturalEn) return anyNaturalEn;
+
+        const ukMale = voices.find((v) => /^en[-_]gb/i.test(v.lang) && !/female|kate|serena|martha|sonia|libby/i.test(v.name));
+        if (ukMale) return ukMale;
+        const anyUk = voices.find((v) => /^en[-_]gb/i.test(v.lang));
+        if (anyUk) return anyUk;
+        const anyEn = voices.find((v) => /^en/i.test(v.lang));
+        return anyEn || voices[0];
+      }
+
+      function populateVoiceSelect() {
+        const sel = document.getElementById('voiceSelect');
+        if (!sel || !('speechSynthesis' in window)) return;
+        const voices = (window.speechSynthesis.getVoices() || []).filter((v) => /^en/i.test(v.lang));
+        const best = getBestJarvisVoice();
+        const autoLabel = best ? `Auto — J.A.R.V.I.S. (${best.name})` : 'Auto — J.A.R.V.I.S. (British AI)';
+        sel.innerHTML = `<option value="auto">${autoLabel}</option>` +
+          voices.map((v) => `<option value="${v.voiceURI}">${v.name} (${v.lang})</option>`).join('');
+        sel.value = state.voiceURI || 'auto';
+      }
+
+      function speakBrowserTts(text, priority) {
+        if (!('speechSynthesis' in window)) return;
+        try {
+          if (priority) window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(text);
+          const chosen = getBestJarvisVoice();
+          if (chosen) {
+            utter.voice = chosen;
+            utter.lang = chosen.lang;
+          } else {
+            utter.lang = 'en-GB';
+          }
+          utter.rate = Number(state.voiceRate) || 0.96;
+          utter.pitch = Number(state.voicePitch) || 0.88;
+          utter.volume = 1.0;
+          window.speechSynthesis.speak(utter);
+        } catch (e) {}
+      }
+
+      async function speakElevenLabs(text, priority) {
+        const apiKey = (state.elApiKey || '').trim();
+        const voiceId = state.elVoiceId === 'custom'
+          ? (state.elCustomVoiceId || '').trim()
+          : (state.elVoiceId || 'JBFqnCBsd6RMkjVDRZzb');
+        if (!apiKey || !voiceId) {
+          speakBrowserTts(text, priority);
+          return;
+        }
+
+        const cacheKey = `${voiceId}|${state.elModelId}|${text}`;
+        try {
+          if (priority && activeElAudio) {
+            activeElAudio.pause();
+            activeElAudio = null;
+          }
+          let audioUrl = elAudioCache.get(cacheKey);
+          if (!audioUrl) {
+            const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+              method: 'POST',
+              headers: {
+                'xi-api-key': apiKey,
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg'
+              },
+              body: JSON.stringify({
+                text,
+                model_id: state.elModelId || 'eleven_flash_v2_5',
+                voice_settings: {
+                  stability: 0.62,
+                  similarity_boost: 0.82
+                }
+              })
+            });
+            if (!res.ok) {
+              throw new Error(`ElevenLabs HTTP ${res.status}`);
+            }
+            const blob = await res.blob();
+            audioUrl = URL.createObjectURL(blob);
+            if (elAudioCache.size > 40) {
+              const oldestKey = elAudioCache.keys().next().value;
+              URL.revokeObjectURL(elAudioCache.get(oldestKey));
+              elAudioCache.delete(oldestKey);
+            }
+            elAudioCache.set(cacheKey, audioUrl);
+          }
+
+          const audio = new Audio(audioUrl);
+          activeElAudio = audio;
+          await audio.play();
+        } catch (err) {
+          showToast('ElevenLabs unavailable — using device voice fallback');
+          speakBrowserTts(text, priority);
+        }
+      }
+
+      function pcmL16ToWavBlob(base64Pcm, sampleRate) {
+        const binary = atob(base64Pcm);
+        const pcmBytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) pcmBytes[i] = binary.charCodeAt(i);
+        const channels = 1;
+        const bitDepth = 16;
+        const byteRate = (sampleRate * channels * bitDepth) / 8;
+        const blockAlign = (channels * bitDepth) / 8;
+        const buffer = new ArrayBuffer(44 + pcmBytes.length);
+        const view = new DataView(buffer);
+        const writeStr = (offset, str) => {
+          for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+        };
+        writeStr(0, 'RIFF');
+        view.setUint32(4, 36 + pcmBytes.length, true);
+        writeStr(8, 'WAVE');
+        writeStr(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, channels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, byteRate, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, bitDepth, true);
+        writeStr(36, 'data');
+        view.setUint32(40, pcmBytes.length, true);
+        new Uint8Array(buffer, 44).set(pcmBytes);
+        return new Blob([buffer], { type: 'audio/wav' });
+      }
+
+      async function speakGeminiTts(text, priority) {
+        const apiKey = (state.gemApiKey || '').trim();
+        if (!apiKey) {
+          speakBrowserTts(text, priority);
+          return;
+        }
+        const voiceName = state.gemVoiceName || 'Orus';
+        const stylePrompt = (state.gemStyle || 'Calm, refined British AI copilot').trim();
+        const cacheKey = `gem|${voiceName}|${stylePrompt}|${text}`;
+        try {
+          if (priority && activeElAudio) {
+            activeElAudio.pause();
+            activeElAudio = null;
+          }
+          let audioUrl = elAudioCache.get(cacheKey);
+          if (!audioUrl) {
+            const promptText = stylePrompt ? `Say in a ${stylePrompt} tone: ${text}` : text;
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: promptText }] }],
+                generationConfig: {
+                  responseModalities: ['AUDIO'],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName }
+                    }
+                  }
+                }
+              })
+            });
+            if (!res.ok) throw new Error(`Gemini TTS HTTP ${res.status}`);
+            const data = await res.json();
+            const part = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
+              ? data.candidates[0].content.parts.find((p) => p.inlineData && p.inlineData.data)
+              : null;
+            if (!part) throw new Error('No audio returned');
+            const mime = part.inlineData.mimeType || 'audio/L16;codec=pcm;rate=24000';
+            let blob;
+            if (mime.toLowerCase().includes('wav')) {
+              const bin = atob(part.inlineData.data);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              blob = new Blob([bytes], { type: 'audio/wav' });
+            } else {
+              const rateMatch = mime.match(/rate=(\d+)/i);
+              const rate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+              blob = pcmL16ToWavBlob(part.inlineData.data, rate);
+            }
+            audioUrl = URL.createObjectURL(blob);
+            if (elAudioCache.size > 40) {
+              const oldestKey = elAudioCache.keys().next().value;
+              URL.revokeObjectURL(elAudioCache.get(oldestKey));
+              elAudioCache.delete(oldestKey);
+            }
+            elAudioCache.set(cacheKey, audioUrl);
+          }
+          const audio = new Audio(audioUrl);
+          activeElAudio = audio;
+          await audio.play();
+        } catch (err) {
+          showToast('Gemini TTS unavailable — using device voice fallback');
+          speakBrowserTts(text, priority);
+        }
+      }
+
+      function speakText(text, priority, clipSlot) {
+        if (!state.voiceEnabled) return;
+        if (state.voiceEngine === 'clips' && clipSlot && playCustomClip(clipSlot)) {
+          return;
+        }
+        if (state.voiceEngine === 'gemini' && (state.gemApiKey || '').trim()) {
+          speakGeminiTts(text, priority);
+        } else if (state.voiceEngine === 'elevenlabs' && (state.elApiKey || '').trim()) {
+          speakElevenLabs(text, priority);
+        } else {
+          speakBrowserTts(text, priority);
+        }
+      }
+
+      async function loadMyElevenLabsVoices() {
+        const apiKey = (state.elApiKey || '').trim();
+        if (!apiKey) {
+          showToast('Paste your ElevenLabs API key first.');
+          return;
+        }
+        const btn = document.getElementById('btnLoadElVoices');
+        if (btn) btn.textContent = 'Loading...';
+        try {
+          const res = await fetch('https://api.elevenlabs.io/v2/voices', {
+            headers: { 'xi-api-key': apiKey }
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          const voices = Array.isArray(data.voices) ? data.voices : [];
+          if (!voices.length) throw new Error('No voices returned');
+          const sel = document.getElementById('elVoiceSelect');
+          sel.innerHTML = voices.map((v) => {
+            const accent = v.labels && v.labels.accent ? ` — ${v.labels.accent}` : '';
+            return `<option value="${v.voice_id}">${v.name}${accent}</option>`;
+          }).join('') + '<option value="custom">Custom Voice ID...</option>';
+          if (voices.some((v) => v.voice_id === state.elVoiceId)) {
+            sel.value = state.elVoiceId;
+          } else {
+            state.elVoiceId = voices[0].voice_id;
+            sel.value = state.elVoiceId;
+            safeSetStorage('satradar_el_voice', state.elVoiceId);
+          }
+          showToast(`Loaded ${voices.length} ElevenLabs voices!`);
+        } catch (e) {
+          showToast('Could not load voices — check your ElevenLabs API key.');
+        } finally {
+          if (btn) btn.textContent = 'Load My Voices';
+        }
+      }
+
+      function syncVoiceEngineUi() {
+        const eng = state.voiceEngine || 'browser';
+        const isClips = eng === 'clips';
+        const isGem = eng === 'gemini';
+        const isEl = eng === 'elevenlabs';
+        const isBr = !isClips && !isGem && !isEl;
+        const activeCls = 'py-1.5 px-2 rounded-lg border border-cyan-500/60 bg-cyan-500/20 text-cyan-200 font-bold transition';
+        const idleCls = 'py-1.5 px-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 font-bold transition';
+
+        const btnClips = document.getElementById('btnEngineClips');
+        const btnGem = document.getElementById('btnEngineGemini');
+        const btnEl = document.getElementById('btnEngineEleven');
+        const btnBr = document.getElementById('btnEngineBrowser');
+        if (btnClips) btnClips.className = isClips ? activeCls : idleCls;
+        if (btnGem) btnGem.className = isGem ? activeCls : idleCls;
+        if (btnEl) btnEl.className = isEl ? activeCls : idleCls;
+        if (btnBr) btnBr.className = isBr ? activeCls : idleCls;
+
+        const clipsBox = document.getElementById('clipsConfigBox');
+        const gemBox = document.getElementById('geminiConfigBox');
+        const elBox = document.getElementById('elevenLabsConfigBox');
+        const customWrap = document.getElementById('elCustomVoiceWrap');
+        if (clipsBox) clipsBox.classList.toggle('hidden', !isClips);
+        if (gemBox) gemBox.classList.toggle('hidden', !isGem);
+        if (elBox) elBox.classList.toggle('hidden', !isEl);
+        if (customWrap) customWrap.classList.toggle('hidden', state.elVoiceId !== 'custom');
+
+        const pill = document.getElementById('elStatusPill');
+        if (pill) {
+          const clipCount = Object.keys(customClipUrls).length;
+          if (isClips) {
+            pill.textContent = clipCount > 0 ? `Real Clips (${clipCount}/5)` : 'Upload / Record';
+            pill.className = clipCount > 0
+              ? 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+              : 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+          } else if (isGem && (state.gemApiKey || '').trim()) {
+            pill.textContent = `Gemini (${state.gemVoiceName})`;
+            pill.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+          } else if (isEl && (state.elApiKey || '').trim()) {
+            pill.textContent = 'ElevenLabs Ready';
+            pill.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+          } else if (isGem || isEl) {
+            pill.textContent = 'Key Needed';
+            pill.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+          } else {
+            pill.textContent = 'Natural (No API)';
+            pill.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/40';
+          }
+        }
+      }
+
+      function speakWelcomeGreeting() {
+        ensureAudioCtx();
+        playJarvisChime();
+        const hr = new Date().getHours();
+        const greetSlot = hr >= 5 && hr < 12 ? 'morning' : hr >= 12 && hr < 17 ? 'afternoon' : 'evening';
+        const phrase = `${getTimeGreeting()}, Sir. Welcome back. All satellite radar systems are online and tracking in ${state.vehicleMode} mode.`;
+        setTimeout(() => speakText(phrase, true, greetSlot), 180);
+        state.greetedOnce = true;
+        const banner = document.getElementById('armBanner');
+        if (banner) banner.classList.add('hidden');
+        showToast(`J.A.R.V.I.S.: "${getTimeGreeting()}, Sir. Systems online."`);
+      }
+
+      // --- Wake Lock (keeps screen on while riding/driving) ---
+      async function requestWakeLock() {
+        if ('wakeLock' in navigator) {
+          try {
+            wakeLockSentinel = await navigator.wakeLock.request('screen');
+          } catch (e) {}
+        }
+      }
+
+      // --- Leaflet Map Initialization ---
+      function initMap() {
+        map = L.map('radarMap', {
+          center: [state.userPos.lat, state.userPos.lng],
+          zoom: 14,
+          zoomControl: true
+        });
+
+        // Verified keyless ArcGIS MapServer tile layers
+        baseLayers = {
+          satellite: [
+            L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+              maxZoom: 19,
+              attribution: 'Esri World Imagery'
+            }),
+            L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+              maxZoom: 19,
+              opacity: 0.85
+            }),
+            L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Boundaries_and_Places_Alternate/MapServer/tile/{z}/{y}/{x}', {
+              maxZoom: 19,
+              opacity: 0.9
+            })
+          ],
+          dark: [
+            L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+              maxZoom: 19,
+              attribution: 'Esri Dark Gray'
+            }),
+            L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+              maxZoom: 19,
+              opacity: 0.7
+            })
+          ],
+          street: [
+            L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+              maxZoom: 19,
+              attribution: 'Esri World Street Map'
+            })
+          ]
+        };
+
+        setMapStyle(state.mapStyle);
+
+        cameraLayerGroup = L.layerGroup().addTo(map);
+
+        const beaconIcon = L.divIcon({
+          className: '',
+          html: '<div class="user-beacon"></div>',
+          iconSize: [22, 22],
+          iconAnchor: [11, 11]
+        });
+
+        userMarker = L.marker([state.userPos.lat, state.userPos.lng], { icon: beaconIcon, zIndexOffset: 1000 }).addTo(map);
+        userRadiusCircle = L.circle([state.userPos.lat, state.userPos.lng], {
+          radius: state.alertRadiusMeters,
+          color: '#38bdf8',
+          weight: 1.5,
+          fillColor: '#38bdf8',
+          fillOpacity: 0.08,
+          dashArray: '5, 6'
+        }).addTo(map);
+
+        // Tap map to pin a custom camera
+        map.on('click', (ev) => {
+          state.pendingPinCoords = { lat: ev.latlng.lat, lng: ev.latlng.lng };
+          document.getElementById('newCamCoordsLabel').textContent =
+            `Coordinates: ${ev.latlng.lat.toFixed(5)}, ${ev.latlng.lng.toFixed(5)}`;
+          document.getElementById('newCamName').value = '';
+          document.getElementById('addCamModal').classList.remove('hidden');
+        });
+      }
+
+      function setMapStyle(styleKey) {
+        state.mapStyle = styleKey;
+        safeSetStorage('satradar_mapstyle', styleKey);
+        activeLayers.forEach((l) => map.removeLayer(l));
+        activeLayers = [];
+        const layers = baseLayers[styleKey] || baseLayers.satellite;
+        layers.forEach((l) => {
+          l.addTo(map);
+          activeLayers.push(l);
+        });
+
+        const styles = { satellite: 'btnMapSat', dark: 'btnMapDark', street: 'btnMapStreet' };
+        Object.entries(styles).forEach(([k, id]) => {
+          const btn = document.getElementById(id);
+          if (!btn) return;
+          if (k === styleKey) {
+            btn.className = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-500 text-slate-950 transition';
+          } else {
+            btn.className = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:text-white transition';
+          }
+        });
+      }
+
+      // --- Overpass API Auto-Update Engine ---
+      async function syncOsmCameras(silent) {
+        const icon = document.getElementById('syncSpinnerIcon');
+        const detail = document.getElementById('syncDetailMessage');
+        if (icon) icon.classList.add('animate-spin');
+        if (!silent && detail) detail.textContent = 'Contacting live OpenStreetMap Overpass satellite database...';
+
+        const lat = state.userPos.lat;
+        const lng = state.userPos.lng;
+        const radius = 15000; // 15 km around current location
+
+        const query = `[out:json][timeout:12];(
+          node["highway"="speed_camera"](around:${radius},${lat},${lng});
+          node["enforcement"="maxspeed"](around:${radius},${lat},${lng});
+          node["enforcement"="traffic_signals"](around:${radius},${lat},${lng});
+          node["man_made"="surveillance"]["surveillance:type"="camera"]["surveillance"="traffic"](around:${radius},${lat},${lng});
+        );out body;`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 11000);
+
+        try {
+          const res = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: 'data=' + encodeURIComponent(query),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (!res.ok) throw new Error('Overpass HTTP ' + res.status);
+          const data = await res.json();
+          const elements = Array.isArray(data.elements) ? data.elements : [];
+
+          const parsed = elements
+            .filter((el) => typeof el.lat === 'number' && typeof el.lon === 'number')
+            .slice(0, 60)
+            .map((el) => {
+              const tags = el.tags || {};
+              let type = 'speed';
+              if (tags.enforcement === 'traffic_signals') type = 'redlight';
+              else if (tags['surveillance'] === 'traffic') type = 'redlight';
+              const maxspeed = parseInt(tags.maxspeed, 10);
+              return {
+                id: 'osm-' + el.id,
+                name: tags.name || tags.ref || (type === 'redlight' ? 'OSM Traffic Signal Camera' : 'OSM Speed Camera'),
+                type,
+                lat: el.lat,
+                lng: el.lon,
+                limit: Number.isFinite(maxspeed) ? maxspeed : state.defaultLimit,
+                source: 'osm'
+              };
+            });
+
+          state.osmCameras = parsed;
+          state.lastSyncTs = Date.now();
+          state.lastSyncPos = { lat, lng };
+          safeSetStorage('satradar_osm_cams', parsed);
+          safeSetStorage('satradar_last_sync', state.lastSyncTs);
+
+          if (detail) {
+            detail.textContent = parsed.length > 0
+              ? `Synced ${parsed.length} live OpenStreetMap cameras within 15 km + local presets & custom pins.`
+              : `Live sync complete (0 extra OSM nodes in 15 km). Showing local presets & your custom pins.`;
+          }
+          if (!silent) showToast(`Camera database updated (${parsed.length} OSM live)`);
+        } catch (err) {
+          clearTimeout(timeoutId);
+          state.lastSyncTs = state.lastSyncTs || Date.now();
+          if (detail) {
+            detail.textContent = 'Using cached & local Bhubaneswar camera database (live Overpass server busy or offline).';
+          }
+        } finally {
+          if (icon) icon.classList.remove('animate-spin');
+          state.nextSyncSec = state.syncIntervalMin * 60;
+          updateSyncUi();
+          renderCamerasAndAlerts();
+        }
+      }
+
+      function updateSyncUi() {
+        const lastEl = document.getElementById('lastSyncTime');
+        const subEl = document.getElementById('syncStatusSub');
+        if (state.lastSyncTs) {
+          const tStr = new Date(state.lastSyncTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          if (lastEl) lastEl.textContent = tStr;
+          if (subEl) subEl.textContent = `Auto-sync ${state.syncIntervalMin}m • Updated ${tStr}`;
+        } else {
+          if (lastEl) lastEl.textContent = 'Pending';
+        }
+      }
+
+      function startSyncCountdown() {
+        clearInterval(syncCountdownId);
+        state.nextSyncSec = state.syncIntervalMin * 60;
+        syncCountdownId = setInterval(() => {
+          state.nextSyncSec -= 1;
+          if (state.nextSyncSec <= 0) {
+            syncOsmCameras(true);
+            state.nextSyncSec = state.syncIntervalMin * 60;
+          }
+          const m = String(Math.floor(state.nextSyncSec / 60)).padStart(2, '0');
+          const s = String(state.nextSyncSec % 60).padStart(2, '0');
+          const el = document.getElementById('nextSyncCountdown');
+          if (el) el.textContent = `${m}:${s}`;
+        }, 1000);
+      }
+
+      // --- Render Cameras, Proximity Alerts, and Nearby Feed ---
+      function renderCamerasAndAlerts() {
+        if (!cameraLayerGroup) return;
+        cameraLayerGroup.clearLayers();
+
+        const allCams = getAllCameras().filter((c) => state.enabledTypes[c.type]);
+
+        // Compute distance to each enabled camera
+        const enriched = allCams.map((cam) => {
+          const dist = haversineMeters(state.userPos.lat, state.userPos.lng, cam.lat, cam.lng);
+          return { ...cam, dist };
+        }).sort((a, b) => a.dist - b.dist);
+
+        // Draw markers on map
+        enriched.forEach((cam) => {
+          const meta = CAMERA_META[cam.type] || CAMERA_META.speed;
+          const icon = L.divIcon({
+            className: '',
+            html: `<div class="cam-marker" style="width:32px;height:32px;background:${meta.color};">${meta.short}</div>`,
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+          });
+          const marker = L.marker([cam.lat, cam.lng], { icon }).addTo(cameraLayerGroup);
+          const srcLabel = cam.source === 'osm' ? 'OSM Live' : cam.source === 'user' ? 'Your Pin' : 'Local Preset';
+          marker.bindPopup(
+            `<div style="min-width:160px;">
+              <div style="font-weight:800;font-size:13px;margin-bottom:3px;">${cam.name}</div>
+              <div style="font-size:11px;color:#94a3b8;">${meta.label} &bull; Limit ${cam.limit} km/h</div>
+              <div style="font-size:11px;color:#38bdf8;margin-top:4px;">${formatDistance(cam.dist)} away &bull; ${srcLabel}</div>
+            </div>`
+          );
+        });
+
+        // Update counts & nearest distance
+        const nearest = enriched[0] || null;
+        document.getElementById('statCamCount').textContent = String(enriched.length);
+        document.getElementById('statNearestDist').textContent = nearest ? formatDistance(nearest.dist) : '--';
+        document.getElementById('osmCountBadge').textContent = `OSM Live: ${state.osmCameras.length}`;
+        document.getElementById('customCountBadge').textContent = `Saved: ${state.customCameras.length}`;
+
+        // Active Speed Limit & Overspeed check
+        const activeLimit = (nearest && nearest.dist <= state.alertRadiusMeters) ? nearest.limit : state.defaultLimit;
+        document.getElementById('currentLimitDisplay').textContent = String(activeLimit);
+        const isOverspeed = state.speedKmh > activeLimit + 2;
+
+        const speedCard = document.getElementById('speedCard');
+        const speedValEl = document.getElementById('speedValue');
+        const overspeedTag = document.getElementById('overspeedTag');
+        if (isOverspeed) {
+          speedValEl.classList.remove('text-white');
+          speedValEl.classList.add('text-red-400');
+          overspeedTag.classList.remove('hidden');
+          speedCard.classList.add('border-red-500/70');
+          speedCard.classList.remove('border-slate-800');
+        } else {
+          speedValEl.classList.add('text-white');
+          speedValEl.classList.remove('text-red-400');
+          overspeedTag.classList.add('hidden');
+          speedCard.classList.remove('border-red-500/70');
+          speedCard.classList.add('border-slate-800');
+        }
+
+        // Proximity Alert Banner
+        const alertBanner = document.getElementById('alertBanner');
+        const alertCard = document.getElementById('alertBannerCard');
+        const alertIconBox = document.getElementById('alertIconBox');
+        const alertTypeBadge = document.getElementById('alertTypeBadge');
+
+        if (nearest && nearest.dist <= state.alertRadiusMeters && state.mutedCamId !== nearest.id) {
+          const meta = CAMERA_META[nearest.type] || CAMERA_META.speed;
+          const isCritical = nearest.dist <= 250 || isOverspeed;
+
+          alertBanner.classList.remove('hidden');
+          document.getElementById('alertDistanceBig').textContent = formatDistance(nearest.dist);
+          document.getElementById('alertCamName').textContent = nearest.name;
+          document.getElementById('alertLimitVal').textContent = String(nearest.limit);
+          alertTypeBadge.textContent = meta.label;
+          alertIconBox.style.backgroundColor = meta.color;
+
+          alertCard.className = isCritical
+            ? 'rounded-2xl p-3.5 sm:p-4 border flex flex-wrap items-center justify-between gap-3 transition-all bg-red-950/85 border-red-500 radar-pulse'
+            : 'rounded-2xl p-3.5 sm:p-4 border flex flex-wrap items-center justify-between gap-3 transition-all bg-amber-950/75 border-amber-500/80 amber-pulse';
+
+          // Trigger J.A.R.V.I.S. Voice Callout once per approach
+          const lastSpoken = state.spokenCamIds[nearest.id] || 0;
+          if (Date.now() - lastSpoken > 45000) {
+            state.spokenCamIds[nearest.id] = Date.now();
+            speakText(`Sir, ${meta.label} detected ${Math.round(nearest.dist)} meters ahead. Speed limit is ${nearest.limit} kilometers per hour.`, false, 'camera');
+          }
+          if (isOverspeed && Date.now() - state.lastOverspeedSpokenTs > 18000) {
+            state.lastOverspeedSpokenTs = Date.now();
+            speakText(`Sir, you are exceeding the speed limit. Recommended speed is ${activeLimit}.`, false, 'overspeed');
+          }
+          if (isCritical) {
+            playRadarBeep(isOverspeed);
+          }
+        } else {
+          alertBanner.classList.add('hidden');
+          if (!nearest || nearest.dist > state.alertRadiusMeters + 100) {
+            state.mutedCamId = null;
+          }
+        }
+
+        // Render Nearby Camera List
+        const listEl = document.getElementById('cameraListContainer');
+        if (enriched.length === 0) {
+          listEl.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">No cameras match your active filters. Enable a filter chip above or tap the map to pin one.</div>`;
+          return;
+        }
+
+        listEl.innerHTML = enriched.slice(0, 14).map((cam) => {
+          const meta = CAMERA_META[cam.type] || CAMERA_META.speed;
+          const isNear = cam.dist <= state.alertRadiusMeters;
+          const srcTag = cam.source === 'osm' ? 'OSM Live' : cam.source === 'user' ? 'My Pin' : 'Preset';
+          const deleteBtn = cam.source === 'user'
+            ? `<button type="button" data-del-cam="${cam.id}" class="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition" title="Remove pin"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`
+            : '';
+
+          return `
+            <div class="flex items-center justify-between gap-2.5 p-2.5 rounded-xl border ${isNear ? 'bg-red-950/35 border-red-500/50' : 'bg-slate-900/75 border-slate-800/90'} hover:border-slate-700 transition">
+              <div class="flex items-center gap-2.5 min-w-0 cursor-pointer flex-1" data-focus-cam="${cam.id}">
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-[10px] font-black text-white shrink-0" style="background:${meta.color};">${meta.short}</div>
+                <div class="min-w-0">
+                  <div class="text-xs font-bold text-white truncate">${cam.name}</div>
+                  <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded border ${meta.badgeClass}">${meta.label}</span>
+                    <span class="text-[10px] text-slate-400 font-medium">Limit ${cam.limit} km/h &bull; ${srcTag}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <div class="text-right">
+                  <div class="text-xs font-extrabold ${isNear ? 'text-red-300' : 'text-cyan-300'} tabular-nums">${formatDistance(cam.dist)}</div>
+                </div>
+                ${deleteBtn}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        if (window.lucide) window.lucide.createIcons();
+      }
+
+      // --- Position Update Handler ---
+      function applyPosition(lat, lng, speedKmh, headingDeg, panMap) {
+        state.userPos = { lat, lng };
+        state.speedKmh = Math.max(0, Math.round(speedKmh || 0));
+        if (state.speedKmh > state.maxSpeedKmh) state.maxSpeedKmh = state.speedKmh;
+        if (Number.isFinite(headingDeg)) state.headingDeg = Math.round(headingDeg);
+
+        document.getElementById('speedValue').textContent = String(state.speedKmh);
+        document.getElementById('statMaxSpeed').textContent = `${state.maxSpeedKmh} km/h`;
+        document.getElementById('headingDisplay').textContent = `Heading: ${compassDir(state.headingDeg)} • ${state.headingDeg}°`;
+
+        if (userMarker) userMarker.setLatLng([lat, lng]);
+        if (userRadiusCircle) {
+          userRadiusCircle.setLatLng([lat, lng]);
+          userRadiusCircle.setRadius(state.alertRadiusMeters);
+        }
+        if (panMap && map) {
+          map.panTo([lat, lng], { animate: true, duration: 0.4 });
+        }
+
+        // Auto-refresh OSM cameras if moved > 2 km since last sync
+        if (state.lastSyncPos) {
+          const moved = haversineMeters(state.lastSyncPos.lat, state.lastSyncPos.lng, lat, lng);
+          if (moved > 2000) {
+            syncOsmCameras(true);
+          }
+        }
+
+        renderCamerasAndAlerts();
+      }
+
+      // --- Live GPS Tracking ---
+      function startLiveGps() {
+        stopSimulation();
+        state.trackingMode = 'live';
+        document.getElementById('sourceModeChip').textContent = 'Live GPS';
+        document.getElementById('gpsStatusLabel').textContent = 'Live Satellite';
+
+        if (!('geolocation' in navigator)) {
+          document.getElementById('gpsStatusLabel').textContent = 'GPS Unavailable';
+          showToast('GPS not supported in this browser — try Test Demo Ride.');
+          return;
+        }
+
+        if (geoWatchId !== null) {
+          navigator.geolocation.clearWatch(geoWatchId);
+          geoWatchId = null;
+        }
+
+        requestWakeLock();
+
+        geoWatchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const { latitude, longitude, speed, heading } = pos.coords;
+            const kmh = typeof speed === 'number' && speed >= 0 ? speed * 3.6 : 0;
+            document.getElementById('gpsStatusLabel').textContent = 'GPS Locked';
+            applyPosition(latitude, longitude, kmh, heading || state.headingDeg, true);
+          },
+          () => {
+            document.getElementById('gpsStatusLabel').textContent = 'Standby (Tap Demo)';
+            // Stay cleanly centered on Bhubaneswar without blocking errors
+          },
+          { enableHighAccuracy: true, maximumAge: 1500, timeout: 10000 }
+        );
+      }
+
+      // --- Interactive Bhubaneswar Demo Ride Simulator ---
+      function startSimulation() {
+        if (geoWatchId !== null) {
+          navigator.geolocation.clearWatch(geoWatchId);
+          geoWatchId = null;
+        }
+        clearInterval(simTimerId);
+        state.simActive = true;
+        state.trackingMode = 'sim';
+        state.simSegIdx = 0;
+        state.simT = 0;
+
+        document.getElementById('sourceModeChip').textContent = 'Demo Ride';
+        document.getElementById('gpsStatusLabel').textContent = 'Simulating';
+        document.getElementById('simBtnLabel').textContent = 'Stop Demo';
+        document.getElementById('simControlsBox').classList.remove('hidden');
+
+        if (!state.greetedOnce && state.voiceEnabled) {
+          speakWelcomeGreeting();
+        }
+
+        simTimerId = setInterval(() => {
+          const p1 = DEMO_WAYPOINTS[state.simSegIdx];
+          const p2 = DEMO_WAYPOINTS[(state.simSegIdx + 1) % DEMO_WAYPOINTS.length];
+          const segDist = Math.max(100, haversineMeters(p1.lat, p1.lng, p2.lat, p2.lng));
+          // Advance along segment proportional to speed (scaled slightly for crisp live testing)
+          const stepMeters = (state.simSpeedKmh / 3.6) * 1.4;
+          state.simT += stepMeters / segDist;
+
+          if (state.simT >= 1) {
+            state.simT = 0;
+            state.simSegIdx = (state.simSegIdx + 1) % (DEMO_WAYPOINTS.length - 1);
+          }
+
+          const cur1 = DEMO_WAYPOINTS[state.simSegIdx];
+          const cur2 = DEMO_WAYPOINTS[state.simSegIdx + 1];
+          const lat = cur1.lat + (cur2.lat - cur1.lat) * state.simT;
+          const lng = cur1.lng + (cur2.lng - cur1.lng) * state.simT;
+          const heading = computeBearing(cur1.lat, cur1.lng, cur2.lat, cur2.lng);
+
+          applyPosition(lat, lng, state.simSpeedKmh, heading, true);
+        }, 500);
+      }
+
+      function stopSimulation() {
+        clearInterval(simTimerId);
+        simTimerId = null;
+        state.simActive = false;
+        document.getElementById('simBtnLabel').textContent = 'Test Demo Ride';
+        document.getElementById('simControlsBox').classList.add('hidden');
+      }
+
+      // --- Vehicle Mode (Bike / Car) ---
+      function setVehicleMode(mode) {
+        state.vehicleMode = mode;
+        safeSetStorage('satradar_vehicle', mode);
+
+        const btnBike = document.getElementById('btnModeBike');
+        const btnCar = document.getElementById('btnModeCar');
+        const badge = document.getElementById('vehicleBadge');
+        const speedEl = document.getElementById('speedValue');
+        const hudBtn = document.getElementById('btnHudFlip');
+
+        if (mode === 'bike') {
+          btnBike.className = 'px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition bg-cyan-500 text-slate-950 shadow';
+          btnCar.className = 'px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition text-slate-300 hover:text-white';
+          badge.textContent = 'Bike Mode • High Contrast';
+          speedEl.classList.remove('car-mode-speed');
+          speedEl.classList.add('bike-mode-speed');
+          hudBtn.classList.add('hidden');
+          hudBtn.classList.remove('flex');
+          state.hudMirror = false;
+          document.getElementById('speedCard').classList.remove('hud-mirrored');
+        } else {
+          btnCar.className = 'px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition bg-cyan-500 text-slate-950 shadow';
+          btnBike.className = 'px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition text-slate-300 hover:text-white';
+          badge.textContent = 'Car Mode • HUD Ready';
+          speedEl.classList.remove('bike-mode-speed');
+          speedEl.classList.add('car-mode-speed');
+          hudBtn.classList.remove('hidden');
+          hudBtn.classList.add('flex');
+        }
+      }
+
+      // --- Add Custom Camera ---
+      function addCustomCamera(name, type, lat, lng, limit) {
+        const meta = CAMERA_META[type] || CAMERA_META.speed;
+        const cam = {
+          id: 'user-' + Date.now(),
+          name: name || `${meta.label} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+          type,
+          lat,
+          lng,
+          limit: Number(limit) || state.defaultLimit,
+          source: 'user'
+        };
+        state.customCameras.unshift(cam);
+        safeSetStorage('satradar_custom_cams', state.customCameras);
+        renderCamerasAndAlerts();
+        showToast(`Pinned ${meta.label} on map!`);
+        speakText(`Coordinates logged, Sir. ${meta.label} added to the satellite grid.`, false);
+      }
+
+      // --- Filter Chips UI ---
+      function syncFilterChipsUi() {
+        document.querySelectorAll('.filter-chip').forEach((btn) => {
+          const type = btn.getAttribute('data-filter');
+          const active = !!state.enabledTypes[type];
+          btn.style.opacity = active ? '1' : '0.38';
+        });
+      }
+
+      // --- Wire All Event Listeners ---
+      function bindEvents() {
+        // Greeting preview text
+        document.getElementById('greetingPreviewText').textContent =
+          `${getTimeGreeting()}, Sir — tap to initialize J.A.R.V.I.S. voice & satellite telemetry.`;
+
+        document.getElementById('btnArmVoice').addEventListener('click', () => {
+          speakWelcomeGreeting();
+          requestWakeLock();
+        });
+        document.getElementById('btnDismissBanner').addEventListener('click', () => {
+          document.getElementById('armBanner').classList.add('hidden');
+        });
+
+        // Vehicle switcher
+        document.getElementById('btnModeBike').addEventListener('click', () => {
+          setVehicleMode('bike');
+          showToast('Switched to Bike Mode (High-Contrast + J.A.R.V.I.S.)');
+          if (state.greetedOnce) speakText('Switching telemetry to bike configuration, Sir.', true);
+        });
+        document.getElementById('btnModeCar').addEventListener('click', () => {
+          setVehicleMode('car');
+          showToast('Switched to Car Mode (HUD Mirror Available)');
+          if (state.greetedOnce) speakText('Switching telemetry to car configuration, Sir.', true);
+        });
+
+        // HUD Mirror flip
+        document.getElementById('btnHudFlip').addEventListener('click', () => {
+          state.hudMirror = !state.hudMirror;
+          document.getElementById('speedCard').classList.toggle('hud-mirrored', state.hudMirror);
+          showToast(state.hudMirror ? 'Windshield HUD Mirror ON' : 'Windshield HUD Mirror OFF');
+        });
+
+        // Voice toggle
+        const updateVoiceBtn = () => {
+          const btn = document.getElementById('btnVoiceToggle');
+          btn.className = state.voiceEnabled
+            ? 'p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 transition'
+            : 'p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-500 transition';
+        };
+        updateVoiceBtn();
+        document.getElementById('btnVoiceToggle').addEventListener('click', () => {
+          state.voiceEnabled = !state.voiceEnabled;
+          safeSetStorage('satradar_voice', state.voiceEnabled);
+          document.getElementById('chkVoiceGreet').checked = state.voiceEnabled;
+          updateVoiceBtn();
+          showToast(state.voiceEnabled ? 'Voice alerts enabled' : 'Voice alerts muted');
+        });
+
+        // Live GPS & Demo Ride
+        document.getElementById('btnStartLiveGps').addEventListener('click', () => {
+          ensureAudioCtx();
+          if (!state.greetedOnce && state.voiceEnabled) speakWelcomeGreeting();
+          startLiveGps();
+          showToast('Live Satellite GPS armed');
+        });
+        document.getElementById('btnToggleSim').addEventListener('click', () => {
+          ensureAudioCtx();
+          if (state.simActive) {
+            stopSimulation();
+            startLiveGps();
+            showToast('Demo stopped — returned to Live GPS');
+          } else {
+            startSimulation();
+            showToast('Demo Ride started along Bhubaneswar corridor');
+          }
+        });
+        document.getElementById('simSpeedSlider').addEventListener('input', (e) => {
+          state.simSpeedKmh = Number(e.target.value);
+          document.getElementById('simSpeedLabel').textContent = `${state.simSpeedKmh} km/h`;
+        });
+        document.getElementById('btnTestGreetingInline').addEventListener('click', speakWelcomeGreeting);
+
+        // Quick Report buttons
+        document.querySelectorAll('.report-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            ensureAudioCtx();
+            const type = btn.getAttribute('data-report-type');
+            addCustomCamera('', type, state.userPos.lat, state.userPos.lng, state.defaultLimit);
+          });
+        });
+
+        // Map style switcher
+        document.getElementById('btnMapSat').addEventListener('click', () => setMapStyle('satellite'));
+        document.getElementById('btnMapDark').addEventListener('click', () => setMapStyle('dark'));
+        document.getElementById('btnMapStreet').addEventListener('click', () => setMapStyle('street'));
+        document.getElementById('btnRecenter').addEventListener('click', () => {
+          if (map) map.setView([state.userPos.lat, state.userPos.lng], 15, { animate: true });
+        });
+
+        // Filter chips
+        document.querySelectorAll('.filter-chip').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const type = btn.getAttribute('data-filter');
+            state.enabledTypes[type] = !state.enabledTypes[type];
+            safeSetStorage('satradar_filters', state.enabledTypes);
+            syncFilterChipsUi();
+            renderCamerasAndAlerts();
+          });
+        });
+
+        // Sync controls
+        document.getElementById('btnSyncNow').addEventListener('click', () => syncOsmCameras(false));
+        const syncSel = document.getElementById('syncIntervalSelect');
+        syncSel.value = String(state.syncIntervalMin);
+        syncSel.addEventListener('change', (e) => {
+          state.syncIntervalMin = Number(e.target.value);
+          safeSetStorage('satradar_syncmin', state.syncIntervalMin);
+          startSyncCountdown();
+          updateSyncUi();
+          showToast(`Auto-update set to every ${state.syncIntervalMin} min`);
+        });
+
+        // Acknowledge active alert
+        document.getElementById('btnMuteAlert').addEventListener('click', () => {
+          const allCams = getAllCameras().filter((c) => state.enabledTypes[c.type]);
+          const nearest = allCams.map((c) => ({ ...c, dist: haversineMeters(state.userPos.lat, state.userPos.lng, c.lat, c.lng) }))
+                                 .sort((a, b) => a.dist - b.dist)[0];
+          if (nearest) state.mutedCamId = nearest.id;
+          document.getElementById('alertBanner').classList.add('hidden');
+        });
+
+        // Delegated clicks in camera list (focus or delete)
+        document.getElementById('cameraListContainer').addEventListener('click', (e) => {
+          const delBtn = e.target.closest('[data-del-cam]');
+          if (delBtn) {
+            const id = delBtn.getAttribute('data-del-cam');
+            state.customCameras = state.customCameras.filter((c) => c.id !== id);
+            safeSetStorage('satradar_custom_cams', state.customCameras);
+            renderCamerasAndAlerts();
+            showToast('Custom camera pin removed');
+            return;
+          }
+          const focusEl = e.target.closest('[data-focus-cam]');
+          if (focusEl) {
+            const id = focusEl.getAttribute('data-focus-cam');
+            const cam = getAllCameras().find((c) => c.id === id);
+            if (cam && map) {
+              map.setView([cam.lat, cam.lng], 16, { animate: true });
+            }
+          }
+        });
+
+        // Settings Modal
+        const settingsModal = document.getElementById('settingsModal');
+        document.getElementById('btnOpenSettings').addEventListener('click', () => {
+          document.getElementById('chkAutoStart').checked = state.autoStart;
+          document.getElementById('chkVoiceGreet').checked = state.voiceEnabled;
+          document.getElementById('chkSoundAlert').checked = state.soundEnabled;
+          document.getElementById('rangeAlertRadius').value = String(state.alertRadiusMeters);
+          document.getElementById('alertRadiusLabel').textContent = `${state.alertRadiusMeters} m`;
+          document.getElementById('rangeDefaultLimit').value = String(state.defaultLimit);
+          document.getElementById('defaultLimitLabel').textContent = `${state.defaultLimit} km/h`;
+          document.getElementById('rangeVoicePitch').value = String(state.voicePitch);
+          document.getElementById('voicePitchLabel').textContent = Number(state.voicePitch).toFixed(2);
+          document.getElementById('rangeVoiceRate').value = String(state.voiceRate);
+          document.getElementById('voiceRateLabel').textContent = Number(state.voiceRate).toFixed(2);
+          document.getElementById('gemApiKeyInput').value = state.gemApiKey || '';
+          document.getElementById('gemVoiceSelect').value = state.gemVoiceName || 'Orus';
+          document.getElementById('gemStyleInput').value = state.gemStyle || 'Calm, refined British AI copilot';
+          document.getElementById('elApiKeyInput').value = state.elApiKey || '';
+          document.getElementById('elVoiceSelect').value = state.elVoiceId || 'JBFqnCBsd6RMkjVDRZzb';
+          document.getElementById('elCustomVoiceId').value = state.elCustomVoiceId || '';
+          document.getElementById('elModelSelect').value = state.elModelId || 'eleven_flash_v2_5';
+          populateVoiceSelect();
+          syncVoiceEngineUi();
+          settingsModal.classList.remove('hidden');
+        });
+        document.getElementById('btnEngineClips').addEventListener('click', () => {
+          state.voiceEngine = 'clips';
+          safeSetStorage('satradar_voice_engine', 'clips');
+          renderClipSlots();
+          syncVoiceEngineUi();
+        });
+        document.getElementById('clipSlotsList').addEventListener('click', (e) => {
+          const recBtn = e.target.closest('[data-clip-rec]');
+          if (recBtn) { toggleMicRecord(recBtn.getAttribute('data-clip-rec')); return; }
+          const playBtn = e.target.closest('[data-clip-play]');
+          if (playBtn) { playCustomClip(playBtn.getAttribute('data-clip-play')); return; }
+          const delBtn = e.target.closest('[data-clip-del]');
+          if (delBtn) { deleteClipBlob(delBtn.getAttribute('data-clip-del')); return; }
+        });
+        document.getElementById('clipSlotsList').addEventListener('change', (e) => {
+          const input = e.target.closest('[data-clip-upload]');
+          if (!input || !input.files || !input.files[0]) return;
+          const slotKey = input.getAttribute('data-clip-upload');
+          saveClipBlob(slotKey, input.files[0]);
+          showToast('Real audio clip saved!');
+        });
+        document.getElementById('btnEngineGemini').addEventListener('click', () => {
+          state.voiceEngine = 'gemini';
+          safeSetStorage('satradar_voice_engine', 'gemini');
+          syncVoiceEngineUi();
+        });
+        document.getElementById('gemApiKeyInput').addEventListener('input', (e) => {
+          state.gemApiKey = e.target.value.trim();
+          safeSetStorage('satradar_gem_key', state.gemApiKey);
+          syncVoiceEngineUi();
+        });
+        document.getElementById('gemVoiceSelect').addEventListener('change', (e) => {
+          state.gemVoiceName = e.target.value;
+          safeSetStorage('satradar_gem_voice', state.gemVoiceName);
+          syncVoiceEngineUi();
+        });
+        document.getElementById('gemStyleInput').addEventListener('input', (e) => {
+          state.gemStyle = e.target.value;
+          safeSetStorage('satradar_gem_style', state.gemStyle);
+        });
+        document.getElementById('btnEngineEleven').addEventListener('click', () => {
+          state.voiceEngine = 'elevenlabs';
+          safeSetStorage('satradar_voice_engine', 'elevenlabs');
+          syncVoiceEngineUi();
+        });
+        document.getElementById('btnEngineBrowser').addEventListener('click', () => {
+          state.voiceEngine = 'browser';
+          safeSetStorage('satradar_voice_engine', 'browser');
+          syncVoiceEngineUi();
+        });
+        document.getElementById('elApiKeyInput').addEventListener('input', (e) => {
+          state.elApiKey = e.target.value.trim();
+          safeSetStorage('satradar_el_key', state.elApiKey);
+          syncVoiceEngineUi();
+        });
+        document.getElementById('elVoiceSelect').addEventListener('change', (e) => {
+          state.elVoiceId = e.target.value;
+          safeSetStorage('satradar_el_voice', state.elVoiceId);
+          syncVoiceEngineUi();
+        });
+        document.getElementById('elCustomVoiceId').addEventListener('input', (e) => {
+          state.elCustomVoiceId = e.target.value.trim();
+          safeSetStorage('satradar_el_custom_voice', state.elCustomVoiceId);
+        });
+        document.getElementById('elModelSelect').addEventListener('change', (e) => {
+          state.elModelId = e.target.value;
+          safeSetStorage('satradar_el_model', state.elModelId);
+        });
+        document.getElementById('btnLoadElVoices').addEventListener('click', loadMyElevenLabsVoices);
+        document.getElementById('voiceSelect').addEventListener('change', (e) => {
+          state.voiceURI = e.target.value;
+          safeSetStorage('satradar_voice_uri', state.voiceURI);
+        });
+        document.getElementById('rangeVoicePitch').addEventListener('input', (e) => {
+          state.voicePitch = Number(e.target.value);
+          safeSetStorage('satradar_voice_pitch', state.voicePitch);
+          document.getElementById('voicePitchLabel').textContent = state.voicePitch.toFixed(2);
+        });
+        document.getElementById('rangeVoiceRate').addEventListener('input', (e) => {
+          state.voiceRate = Number(e.target.value);
+          safeSetStorage('satradar_voice_rate', state.voiceRate);
+          document.getElementById('voiceRateLabel').textContent = state.voiceRate.toFixed(2);
+        });
+        document.getElementById('btnCloseSettings').addEventListener('click', () => settingsModal.classList.add('hidden'));
+        document.getElementById('chkAutoStart').addEventListener('change', (e) => {
+          state.autoStart = e.target.checked;
+          safeSetStorage('satradar_autostart', state.autoStart);
+        });
+        document.getElementById('chkVoiceGreet').addEventListener('change', (e) => {
+          state.voiceEnabled = e.target.checked;
+          safeSetStorage('satradar_voice', state.voiceEnabled);
+          updateVoiceBtn();
+        });
+        document.getElementById('chkSoundAlert').addEventListener('change', (e) => {
+          state.soundEnabled = e.target.checked;
+          safeSetStorage('satradar_sound', state.soundEnabled);
+        });
+        document.getElementById('rangeAlertRadius').addEventListener('input', (e) => {
+          state.alertRadiusMeters = Number(e.target.value);
+          safeSetStorage('satradar_radius', state.alertRadiusMeters);
+          document.getElementById('alertRadiusLabel').textContent = `${state.alertRadiusMeters} m`;
+          if (userRadiusCircle) userRadiusCircle.setRadius(state.alertRadiusMeters);
+          renderCamerasAndAlerts();
+        });
+        document.getElementById('rangeDefaultLimit').addEventListener('input', (e) => {
+          state.defaultLimit = Number(e.target.value);
+          safeSetStorage('satradar_limit', state.defaultLimit);
+          document.getElementById('defaultLimitLabel').textContent = `${state.defaultLimit} km/h`;
+          renderCamerasAndAlerts();
+        });
+        document.getElementById('btnModalTestGreet').addEventListener('click', speakWelcomeGreeting);
+        document.getElementById('btnResetCustomCams').addEventListener('click', () => {
+          state.customCameras = [];
+          safeSetStorage('satradar_custom_cams', []);
+          renderCamerasAndAlerts();
+          showToast('Cleared your custom camera pins');
+        });
+
+        // Auto-Start Setup Modal
+        const autoModal = document.getElementById('autoStartModal');
+        document.getElementById('btnAutoStartGuide').addEventListener('click', () => autoModal.classList.remove('hidden'));
+        document.getElementById('btnCloseAutoStart').addEventListener('click', () => autoModal.classList.add('hidden'));
+        document.getElementById('btnDoneAutoStart').addEventListener('click', () => autoModal.classList.add('hidden'));
+
+        // Add Camera Modal
+        const addModal = document.getElementById('addCamModal');
+        const closeAdd = () => addModal.classList.add('hidden');
+        document.getElementById('btnCloseAddCam').addEventListener('click', closeAdd);
+        document.getElementById('btnCancelAddCam').addEventListener('click', closeAdd);
+        document.getElementById('btnSaveNewCam').addEventListener('click', () => {
+          if (!state.pendingPinCoords) return;
+          const name = document.getElementById('newCamName').value.trim();
+          const type = document.getElementById('newCamType').value;
+          const limit = document.getElementById('newCamLimit').value;
+          addCustomCamera(name, type, state.pendingPinCoords.lat, state.pendingPinCoords.lng, limit);
+          closeAdd();
+        });
+      }
+
+      // --- Boot ---
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.onvoiceschanged = populateVoiceSelect;
+      }
+      window.addEventListener('DOMContentLoaded', () => {
+        if (window.lucide) window.lucide.createIcons();
+        populateVoiceSelect();
+        loadAllSavedClips();
+        setVehicleMode(state.vehicleMode);
+        syncFilterChipsUi();
+        initMap();
+        bindEvents();
+        renderCamerasAndAlerts();
+        startSyncCountdown();
+        syncOsmCameras(true);
+        if (state.autoStart) {
+          startLiveGps();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
